@@ -136,6 +136,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			for _, ee := range live {
 				cmds = append(cmds, "'"+ee.Tool+" "+ee.Pkg+"'")
 			}
+			sort.Strings(cmds)
 			fmt.Fprintln(w, e.When.Format("15:04:05.00"), len(live), cmds)
 		}
 		return
