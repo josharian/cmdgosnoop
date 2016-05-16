@@ -105,7 +105,8 @@ func (x eventByTime) Swap(i, j int)      { x[i], x[j] = x[j], x[i] }
 func (x eventByTime) Less(i, j int) bool { return x[i].When.Before(x[j].When) }
 
 type server struct {
-	evc chan struct{}
+	evc   chan struct{}
+	start time.Time
 
 	mu   sync.Mutex
 	all  []event
@@ -140,6 +141,32 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, e.When.Format("15:04:05.00"), len(live), cmds)
 		}
 		return
+
+	case "/trace":
+		sort.Sort(eventByTime(s.all))
+		live := make(map[string]event)
+		var data ViewerData
+		for _, e := range s.all {
+			switch e.Kind {
+			case "start":
+				live[e.ID] = e
+			case "stop":
+				start := live[e.ID]
+				var ev ViewerEvent
+				ev.Phase = "X"
+				ev.Dur = float64(e.When.Sub(start.When)) / float64(time.Microsecond)
+				ev.Time = float64(start.When.Sub(s.start)) / float64(time.Microsecond)
+				ev.Name = e.Tool + ":" + e.Pkg
+				data.Events = append(data.Events, &ev)
+				delete(live, e.ID)
+			}
+		}
+		err := json.NewEncoder(w).Encode(data)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+
 	case "/event":
 	default:
 		http.Error(w, "bad path "+r.URL.Path, http.StatusBadRequest)
@@ -169,14 +196,16 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func daemonize() {
 	fmt.Println("starting daemon")
 	s := server{
-		evc:  make(chan struct{}),
-		live: make(map[string]event),
+		evc:   make(chan struct{}),
+		live:  make(map[string]event),
+		start: time.Now(),
 	}
 	http.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {})
 	http.Handle("/event", &s)
 	http.Handle("/status", &s)
 	http.Handle("/die", &s)
 	http.Handle("/chart", &s)
+	http.Handle("/trace", &s)
 	go func() {
 		log.Fatal(http.ListenAndServe(":10808", nil))
 	}()
@@ -188,4 +217,40 @@ func daemonize() {
 			return
 		}
 	}
+}
+
+type ViewerData struct {
+	Events   []*ViewerEvent         `json:"traceEvents"`
+	Frames   map[string]ViewerFrame `json:"stackFrames"`
+	TimeUnit string                 `json:"displayTimeUnit"`
+
+	// This is where mandatory part of the trace starts (e.g. thread names)
+	footer int
+}
+
+type ViewerEvent struct {
+	Name     string      `json:"name,omitempty"`
+	Phase    string      `json:"ph"`
+	Scope    string      `json:"s,omitempty"`
+	Time     float64     `json:"ts"`
+	Dur      float64     `json:"dur,omitempty"`
+	Pid      uint64      `json:"pid"`
+	Tid      uint64      `json:"tid"`
+	ID       uint64      `json:"id,omitempty"`
+	Stack    int         `json:"sf,omitempty"`
+	EndStack int         `json:"esf,omitempty"`
+	Arg      interface{} `json:"args,omitempty"`
+}
+
+type ViewerFrame struct {
+	Name   string `json:"name"`
+	Parent int    `json:"parent,omitempty"`
+}
+
+type NameArg struct {
+	Name string `json:"name"`
+}
+
+type SortIndexArg struct {
+	Index int `json:"sort_index"`
 }

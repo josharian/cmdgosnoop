@@ -15,4 +15,10 @@ It'll spit out the number of concurrent commands running and what they were.
 The idea is to spot inefficiencies in how cmd/go schedules work,
 and also (possibly, later) to spot bottlenecks in user package structure.
 
-Plan is to put in some html instead of terminal dump and make more user friendly.
+To use with chrome trace viewer:
+
+* Clone https://github.com/catapult-project/catapult
+* Follow the instructions above, but instead: `curl http://localhost:10808/trace > trace.json`
+* Run `$CATAPULT/tracing/bin/trace2html trace.json --output=trace.html && open trace.html`
+
+Sample trace output for compiling cmd/go is trace.html in this directory.
